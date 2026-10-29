@@ -45,8 +45,7 @@ git checkout -b agda-2.9.0        # the new Agda release
 
 Set `AGDA_VERSION`, `ALS_WASM_NAME`, `STDLIB_VERSION`, `ALS_AGDA_FLAG`, and the
 four revisions. Keep the `ALS_WASM_NAME` convention of the existing branches
-(`als-2.8ext`, `als-2.7ext`, `als-2.6`) so downstream apps keep a predictable
-name.
+(`als-2.8ext`) so downstream apps keep a predictable name.
 
 ## 4. Check the entropy patch
 
@@ -64,10 +63,11 @@ modifications, which keeps the shipped compiler stock.
 
 Either run the **Build ALS WASM** workflow from the Actions tab ("Run
 workflow"), or build locally with the pinned toolchain. On a version branch the
-workflow also runs automatically when a build input changes —
-`config/version.env` (the pinned versions), a build script, the cross-compile
-patch, or the workflow file itself — but not for unrelated commits, so
-documentation and verification changes do not trigger hour-long rebuilds.
+WASM compile also runs automatically when a WASM build input changes —
+`config/version.env` (the pinned versions), `scripts/build-als-wasm.sh`, the
+cross-compile patch, or the workflow file itself — but not for documentation,
+verification, or the cheaper data/stdlib archive scripts, so unrelated commits
+do not trigger hour-long rebuilds.
 
 To build locally with the pinned toolchain:
 

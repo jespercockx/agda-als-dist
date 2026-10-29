@@ -77,6 +77,9 @@ const manifest = {
     path: data.path,
     byteLength: data.byteLength,
     sha256: data.sha256,
+    // Where the precompiled primitive interfaces live inside the archive
+    // (Agda 2.8+ only looks under _build/<version>/agda/).
+    interfaceDir: `lib/prim/_build/${version.AGDA_VERSION}/agda`,
   },
   stdlib: {
     path: stdlib.path,

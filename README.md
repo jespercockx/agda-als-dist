@@ -26,15 +26,19 @@ two are complementary. See [`NOTICE.md`](NOTICE.md) for provenance.
 Distribution follows the same branch-per-version convention as
 `agda-wasm-dist`:
 
-| Branch | Agda | ALS file | stdlib | Status |
-| --- | --- | --- | --- | --- |
-| `agda-2.8.0` | 2.8.0 | `als-2.8ext.wasm` | 2.3 | available |
-| `agda-2.7.0.1` | 2.7.0.1 | `als-2.7ext.wasm` | 2.2 | planned |
-| `agda-2.6.4.3` | 2.6.4.3 | `als-2.6.wasm` | 2.1 | planned |
+| Branch | Agda | ALS file | stdlib |
+| --- | --- | --- | --- |
+| `agda-2.8.0` | 2.8.0 | `als-2.8ext.wasm` | 2.3 |
 
 `main` carries only the shared build machinery and documentation. Each
 `agda-<version>` branch is self-contained: it pins its upstream revisions in
-`config/version.env` and commits the artifacts it produced.
+`config/version.env` and commits the artifacts it produced. New Agda releases
+get a new `agda-<version>` branch (see [`UPDATING.md`](UPDATING.md)); the
+machinery is version-parameterized, so the older branches are unaffected.
+
+Agda 2.8.0 and later are supported: earlier releases predate the `--setup`
+primitive installer that the WASM language server uses, and the
+`_build/<version>/agda/` interface layout relied on below.
 
 Consumers that support several Agda versions use one submodule (or one fetch)
 per version branch.
@@ -45,7 +49,7 @@ per version branch.
 | --- | --- |
 | `als-<ver>.wasm` | The optimized (`cabal -O2` + `wasm-opt -Oz`) ALS for WASI |
 | `als-<ver>.wasm.gz` | Gzip transport copy for `DecompressionStream` clients |
-| `agda-data.zip` | Agda primitives (`lib/prim/...`), sources **and** interfaces |
+| `agda-data.zip` | Agda primitives: `lib/prim/...` sources plus interfaces under `lib/prim/_build/<agdaVersion>/agda/` |
 | `agda-stdlib-<ver>.zip` | Matching standard-library sources |
 | `dist-manifest.json` | Versions, pinned commits, byte lengths, SHA-256 hashes |
 
@@ -53,11 +57,17 @@ The standard-library archive is source-only so that clients which never import
 it do not pay for it. The primitive archive, by contrast, ships precomputed
 `.agdai` interfaces so no client ever recompiles the primitive library.
 
-Agda 2.8 removed local interfaces and looks only in `_build/<version>/agda/`,
-while this archive — matching the long-standing layout of browser Agda
-bundles — stores interfaces beside their sources. A consumer therefore
-relocates `lib/prim/**.agdai` to `lib/prim/_build/<agdaVersion>/agda/**.agdai`
-after extraction (see plfa-playground's `src/lib/worker/drive.ts`).
+Agda 2.8 and later look for interfaces only under `_build/<agdaVersion>/agda/`
+(local interfaces beside sources were removed), so the archive puts them
+exactly where Agda will look:
+
+```text
+lib/prim/_build/2.8.0/agda/Agda/Builtin/Nat.agdai
+```
+
+A consumer extracts the archive into its Agda data directory as-is; there is no
+relocation step. `dist-manifest.json` also records this location as
+`data.interfaceDir`.
 
 ## Consuming the artifacts
 
@@ -114,7 +124,12 @@ cache-bust strings that clients used to hardcode:
     "compressedSha256": "…",
     "cacheBust": "629af8a86004"
   },
-  "data": { "path": "agda-data.zip", "byteLength": 571535, "sha256": "…" },
+  "data": {
+    "path": "agda-data.zip",
+    "byteLength": 571535,
+    "sha256": "…",
+    "interfaceDir": "lib/prim/_build/2.8.0/agda"
+  },
   "stdlib": { "path": "agda-stdlib-2.3.zip", "byteLength": 1972500, "sha256": "…" }
 }
 ```
@@ -157,12 +172,13 @@ node scripts/verify-artifacts.mjs
 ```
 
 CI runs exactly these steps; the local path exists so maintainers can reproduce
-and debug a build. The build workflow is expensive, so on a version branch it
-runs automatically only when a build input changes (`config/version.env`, a
-build script, the patch, or the workflow itself) and can otherwise be started
-from the Actions tab. Releases are published by a separate, fast, tag-triggered
-workflow that attaches the committed, manifest-verified artifacts without
-rebuilding.
+and debug a build. The WASM compile is the expensive part, so on a version
+branch the workflow runs automatically only when a *WASM* build input changes
+(`config/version.env`, `scripts/build-als-wasm.sh`, `patches/**`, or the
+workflow itself) and can otherwise be started from the Actions tab. The other
+artifacts are cheap to regenerate locally and do not trigger a rebuild.
+Releases are published by a separate, fast, tag-triggered workflow that attaches
+the committed, manifest-verified artifacts without rebuilding.
 
 `build-data-archive.sh` needs a native Agda of the exact version and downloads
 the official release binary automatically (`AGDA_BINARY` overrides this, e.g.

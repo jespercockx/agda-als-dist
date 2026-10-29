@@ -17,9 +17,10 @@
 # and the build aborts on any difference, so a mismatched archive cannot be
 # published silently.
 #
-# Layout: entries are `lib/prim/...`, with interfaces stored beside their
-# sources (`lib/prim/Agda/Builtin/Nat.agdai`). Consumers relocate the
-# interfaces into `_build/<version>/agda/` themselves; see README.md.
+# Layout: entries are `lib/prim/...` (the sources) together with the interfaces
+# Agda wrote under `lib/prim/_build/<agdaVersion>/agda/...`, which is exactly
+# where Agda 2.8 and later look for them. Consumers extract the archive as-is;
+# there is no relocation step.
 #
 # Environment overrides:
 #   AGDA_BINARY   native Agda binary to use (default: official release download)
@@ -109,20 +110,20 @@ fi
 staging=$(mktemp -d)
 trap 'rm -rf "$sandbox" "$staging"' EXIT
 
-mkdir -p "$staging/lib"
-cp -a "$prim_dir" "$staging/lib/prim"
+mkdir -p "$staging/lib/prim"
+cp -a "$prim_dir"/. "$staging/lib/prim/"
 
-# Move interfaces next to their sources (this repository's documented layout),
-# then drop the build directory.
-( cd "$staging/lib/prim" && find _build -name '*.agdai' -print0 |
-  while IFS= read -r -d '' iface; do
-    rel=${iface#_build/*/agda/}
-    mkdir -p "$(dirname "$rel")"
-    mv "$iface" "$rel"
-  done )
+# Keep the interfaces under _build/<agdaVersion>/agda/ (Agda's own layout) and
+# drop anything else the build directory accumulated.
 rm -rf "$staging/lib/prim/_build"
+( cd "$prim_dir" && find _build -name '*.agdai' -print0 |
+  while IFS= read -r -d '' iface; do
+    dest="$staging/lib/prim/$iface"
+    mkdir -p "$(dirname "$dest")"
+    cp -a "$iface" "$dest"
+  done )
 
-count=$(cd "$staging" && find lib/prim -name '*.agdai' | wc -l)
+count=$(cd "$staging" && find lib/prim/_build -name '*.agdai' | wc -l)
 echo "Bundling ${count} primitive interfaces"
 
 rm -f "$output"
