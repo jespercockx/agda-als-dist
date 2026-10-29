@@ -15,7 +15,17 @@ import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const manifest = JSON.parse(readFileSync(join(repoRoot, "dist-manifest.json"), "utf8"));
+const manifestPath = join(repoRoot, "dist-manifest.json");
+
+// Artifacts live on the per-version branches (agda-<version>). The shared
+// `main` branch and pull requests targeting it carry no manifest, so there is
+// nothing to verify there.
+if (!existsSync(manifestPath)) {
+  console.log("No dist-manifest.json on this branch; nothing to verify.");
+  process.exit(0);
+}
+
+const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 
 const failures = [];
 
