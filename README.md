@@ -73,7 +73,10 @@ Pin a release tag rather than the moving branch in committed projects.
 ### From a release
 
 Tags are named `v<agda>-als-<sha>`, e.g. `v2.8.0-als-e6541f8`, and attach the
-wasm, its gzip copy, both archives, and `dist-manifest.json`.
+wasm, its gzip copy, both archives, and `dist-manifest.json`. Pushing a tag runs
+[`release.yml`](.github/workflows/release.yml), which re-verifies the committed
+artifacts against the manifest and publishes those exact files without
+rebuilding.
 
 ### Direct URLs
 
