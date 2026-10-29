@@ -126,7 +126,7 @@ cache-bust strings that clients used to hardcode:
   },
   "data": {
     "path": "agda-data.zip",
-    "byteLength": 571535,
+    "byteLength": 574839,
     "sha256": "…",
     "interfaceDir": "lib/prim/_build/2.8.0/agda"
   },
