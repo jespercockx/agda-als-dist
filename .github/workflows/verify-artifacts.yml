@@ -1,0 +1,34 @@
+name: Verify artifacts
+
+# Cheap, toolchain-free check that the committed artifacts on this branch still
+# match dist-manifest.json (byte length + SHA-256), and that the gzip transport
+# copy decompresses to the committed wasm. Runs on every push and pull request
+# that could touch the artifacts.
+
+on:
+  push:
+    paths:
+      - "*.wasm"
+      - "*.wasm.gz"
+      - "agda-data.zip"
+      - "agda-stdlib-*.zip"
+      - "dist-manifest.json"
+      - "scripts/verify-artifacts.mjs"
+      - ".github/workflows/verify-artifacts.yml"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify artifacts against dist-manifest.json
+        run: node scripts/verify-artifacts.mjs

@@ -1,0 +1,6 @@
+# Build scratch space (pinned ALS/Agda checkouts, cabal output).
+/.compiler-work/
+/.compiler-work-*/
+
+# Transient files from the archive scripts.
+*.zip.next

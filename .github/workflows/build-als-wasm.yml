@@ -1,0 +1,110 @@
+name: Build ALS WASM
+
+# Builds the Agda Language Server for WASI from the revisions pinned in
+# config/version.env on this branch, then assembles the distribution artifacts
+# (wasm, gzip transport copy, primitive data archive, stdlib archive) and
+# regenerates dist-manifest.json.
+#
+# Triggered manually, on pushes to version branches, and on version tags. The
+# version branch's config/version.env is the single source of truth.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "agda-*"
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read version configuration
+        id: version
+        run: |
+          set -euo pipefail
+          source config/version.env
+          {
+            echo "flavour=${GHC_WASM_META_FLAVOUR}"
+            echo "ghc_wasm_meta_revision=${GHC_WASM_META_REVISION}"
+            echo "agda_version=${AGDA_VERSION}"
+            echo "als_wasm_name=${ALS_WASM_NAME}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install host build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential curl git jq unzip zstd zip \
+            autoconf automake libtool alex happy
+
+      - name: Install pinned ghc-wasm-meta toolchain
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://gitlab.haskell.org/ghc/ghc-wasm-meta.git "$RUNNER_TEMP/ghc-wasm-meta"
+          git -C "$RUNNER_TEMP/ghc-wasm-meta" fetch --depth=1 origin "${{ steps.version.outputs.ghc_wasm_meta_revision }}"
+          git -C "$RUNNER_TEMP/ghc-wasm-meta" checkout --detach FETCH_HEAD
+          FLAVOUR="${{ steps.version.outputs.flavour }}" PREFIX="$HOME/.ghc-wasm" \
+            "$RUNNER_TEMP/ghc-wasm-meta/setup.sh"
+          "$HOME/.ghc-wasm/add_to_github_path.sh"
+
+      - name: Build ALS for WASI
+        run: |
+          set -euo pipefail
+          source "$HOME/.ghc-wasm/env"
+          ./scripts/build-als-wasm.sh
+
+      - name: Fetch standard library archive
+        run: ./scripts/fetch-stdlib-archive.sh
+
+      - name: Build primitive data archive
+        run: |
+          set -euo pipefail
+          source "$HOME/.ghc-wasm/env"
+          ./scripts/build-data-archive.sh
+
+      - name: Regenerate dist-manifest.json
+        run: node scripts/compute-manifest.mjs
+
+      - name: Verify the built wasm reports its version
+        run: |
+          set -euo pipefail
+          source "$HOME/.ghc-wasm/env"
+          wasmtime run -C cache=n -C compiler=cranelift -C parallel-compilation=n \
+            -O opt-level=0 --env PATH= -- "${{ steps.version.outputs.als_wasm_name }}.wasm" --version
+
+      - name: Verify artifacts against the manifest
+        run: node scripts/verify-artifacts.mjs
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: agda-als-${{ steps.version.outputs.agda_version }}
+          path: |
+            ${{ steps.version.outputs.als_wasm_name }}.wasm
+            ${{ steps.version.outputs.als_wasm_name }}.wasm.gz
+            agda-data.zip
+            agda-stdlib-*.zip
+            dist-manifest.json
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AGDA_VERSION: ${{ steps.version.outputs.agda_version }}
+          WASM_NAME: ${{ steps.version.outputs.als_wasm_name }}
+        run: |
+          set -euo pipefail
+          als_sha=$(git rev-parse --short HEAD)
+          gh release create "v${AGDA_VERSION}-als-${als_sha}" \
+            "${WASM_NAME}.wasm" "${WASM_NAME}.wasm.gz" \
+            agda-data.zip agda-stdlib-*.zip dist-manifest.json \
+            --title "Agda ${AGDA_VERSION} (ALS ${als_sha})" \
+            --generate-notes
