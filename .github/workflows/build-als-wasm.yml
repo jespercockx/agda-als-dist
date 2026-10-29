@@ -1,23 +1,34 @@
 name: Build ALS WASM
 
-# Builds the Agda Language Server for WASI from the revisions pinned in
-# config/version.env on this branch, then assembles the distribution artifacts
-# (wasm, gzip transport copy, primitive data archive, stdlib archive) and
-# regenerates dist-manifest.json.
+# Rebuilds the Agda Language Server for WASI from the revisions pinned in
+# config/version.env, assembles the distribution artifacts (wasm, gzip
+# transport copy, primitive data archive, stdlib archive) and regenerates
+# dist-manifest.json.
 #
-# Triggered manually, on pushes to version branches, and on version tags. The
-# version branch's config/version.env is the single source of truth.
+# This is the expensive workflow: it compiles Agda from source. On version
+# branches it therefore runs only when a build input actually changes — the
+# pinned versions in config/version.env, the build scripts, the cross-compile
+# patch, or this workflow. It can always be run by hand with "Run workflow".
+#
+# Releasing the *committed* (manifest-verified) artifacts is a separate, fast,
+# tag-triggered workflow: release.yml.
 
 on:
   workflow_dispatch:
   push:
     branches:
       - "agda-*"
-    tags:
-      - "v*"
+    paths:
+      - "config/version.env"
+      - "patches/**"
+      - "scripts/build-als-wasm.sh"
+      - "scripts/build-data-archive.sh"
+      - "scripts/fetch-stdlib-archive.sh"
+      - "scripts/compute-manifest.mjs"
+      - ".github/workflows/build-als-wasm.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -94,17 +105,3 @@ jobs:
             agda-stdlib-*.zip
             dist-manifest.json
 
-      - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          AGDA_VERSION: ${{ steps.version.outputs.agda_version }}
-          WASM_NAME: ${{ steps.version.outputs.als_wasm_name }}
-        run: |
-          set -euo pipefail
-          als_sha=$(git rev-parse --short HEAD)
-          gh release create "v${AGDA_VERSION}-als-${als_sha}" \
-            "${WASM_NAME}.wasm" "${WASM_NAME}.wasm.gz" \
-            agda-data.zip agda-stdlib-*.zip dist-manifest.json \
-            --title "Agda ${AGDA_VERSION} (ALS ${als_sha})" \
-            --generate-notes

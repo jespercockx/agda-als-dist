@@ -1,0 +1,78 @@
+name: Release
+
+# Publishes a GitHub release for a version tag, attaching the *committed*
+# artifacts. It does not rebuild anything: the artifacts on a version branch
+# are the authoritative, manifest-verified ones, and this workflow re-checks
+# them before publishing. Tag names follow `v<agda>-als-<sha>`, e.g.
+# `v2.8.0-als-e6541f8`.
+#
+# Keep this fast; building lives in build-als-wasm.yml.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish, e.g. v2.8.0-als-e6541f8"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Ensure this is a version branch with artifacts
+        run: |
+          set -euo pipefail
+          if [[ ! -f dist-manifest.json ]]; then
+            echo "No dist-manifest.json here. Releases must be tagged on an agda-<version> branch." >&2
+            exit 1
+          fi
+
+      - name: Verify committed artifacts against dist-manifest.json
+        run: node scripts/verify-artifacts.mjs
+
+      - name: Read version configuration
+        id: version
+        run: |
+          set -euo pipefail
+          source config/version.env
+          {
+            echo "agda_version=${AGDA_VERSION}"
+            echo "wasm_name=${ALS_WASM_NAME}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AGDA_VERSION: ${{ steps.version.outputs.agda_version }}
+          WASM_NAME: ${{ steps.version.outputs.wasm_name }}
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          assets=(
+            "${WASM_NAME}.wasm"
+            "${WASM_NAME}.wasm.gz"
+            agda-data.zip
+            agda-stdlib-*.zip
+            dist-manifest.json
+          )
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${assets[@]}" --clobber
+          else
+            gh release create "$TAG" "${assets[@]}" \
+              --title "Agda ${AGDA_VERSION} (${TAG})" \
+              --generate-notes
+          fi

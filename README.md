@@ -154,7 +154,12 @@ node scripts/verify-artifacts.mjs
 ```
 
 CI runs exactly these steps; the local path exists so maintainers can reproduce
-and debug a build.
+and debug a build. The build workflow is expensive, so on a version branch it
+runs automatically only when a build input changes (`config/version.env`, a
+build script, the patch, or the workflow itself) and can otherwise be started
+from the Actions tab. Releases are published by a separate, fast, tag-triggered
+workflow that attaches the committed, manifest-verified artifacts without
+rebuilding.
 
 `build-data-archive.sh` needs a native Agda of the exact version and downloads
 the official release binary automatically (`AGDA_BINARY` overrides this, e.g.

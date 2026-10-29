@@ -62,8 +62,14 @@ modifications, which keeps the shipped compiler stock.
 
 ## 5. Build
 
-Either run the **Build ALS WASM** workflow (`workflow_dispatch`), or build
-locally with the pinned toolchain:
+Either run the **Build ALS WASM** workflow from the Actions tab ("Run
+workflow"), or build locally with the pinned toolchain. On a version branch the
+workflow also runs automatically when a build input changes —
+`config/version.env` (the pinned versions), a build script, the cross-compile
+patch, or the workflow file itself — but not for unrelated commits, so
+documentation and verification changes do not trigger hour-long rebuilds.
+
+To build locally with the pinned toolchain:
 
 ```sh
 git clone --filter=blob:none https://gitlab.haskell.org/ghc/ghc-wasm-meta.git
@@ -112,8 +118,10 @@ git tag v2.9.0-als-<short-sha>
 git push origin v2.9.0-als-<short-sha>
 ```
 
-The release job attaches the wasm, its gzip copy, both archives, and the
-manifest.
+The tag triggers `release.yml`, which re-verifies the committed artifacts
+against `dist-manifest.json` and attaches the wasm, its gzip copy, both
+archives, and the manifest to the release. It does not rebuild, so the released
+files are exactly the ones committed on the branch.
 
 ## Interfaces
 
