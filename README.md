@@ -25,7 +25,10 @@ two are complementary. See [`NOTICE.md`](NOTICE.md) for provenance.
 
 Each supported Agda release gets one GitHub **Release**, tagged
 `v<agda>-als-<sha>` (for example `v2.8.0-als-e6541f8`). The release attaches the
-built artifacts described below.
+built artifacts described below as **release assets**. That is where they live:
+none of them are committed to a branch, so download them from the release page
+(or its `https://github.com/jespercockx/agda-als-dist/releases/download/<tag>/<asset>`
+URLs), not from a branch checkout.
 
 | Release | Agda | ALS file | stdlib |
 | --- | --- | --- | --- |
