@@ -8,7 +8,7 @@ committed.
 ## The moving parts
 
 A build brings together four pinned inputs, all recorded in
-`config/version.env` on the version branch:
+`config/version.env` on `main`:
 
 | Input | Where it is pinned | Notes |
 | --- | --- | --- |
@@ -33,19 +33,18 @@ version in the language server (`ALS_AGDA_FLAG`).
   `ghc-wasm-meta` revision that ships it as `GHC_WASM_META_REVISION`. Otherwise
   keep both.
 
-## 2. Create the version branch
+## 2. Set the version on `main`
 
-Branch from `main` so the shared machinery is inherited:
+Everything lives on `main`; there is no per-version branch. Check it out:
 
 ```sh
 git checkout main
-git checkout -b agda-2.9.0        # the new Agda release
 ```
 
 ## 3. Edit `config/version.env`
 
 Set `AGDA_VERSION`, `ALS_WASM_NAME`, `STDLIB_VERSION`, `ALS_AGDA_FLAG`, and the
-four revisions. Keep the `ALS_WASM_NAME` convention of the existing branches
+four revisions. Keep the `ALS_WASM_NAME` convention of the existing releases
 (`als-2.8ext`) so downstream apps keep a predictable name.
 
 ## 4. Check the entropy patch
@@ -63,9 +62,9 @@ modifications, which keeps the shipped compiler stock.
 ## 5. Build
 
 Either run the **Build WASM** and **Build artifacts** workflows from the Actions
-tab ("Run workflow"), or build locally with the pinned toolchain. On a version
-branch the WASM compile also runs automatically when a WASM build input changes
-— `config/version.env` (the pinned versions), `scripts/build-als-wasm.sh`, the
+tab ("Run workflow"), or build locally with the pinned toolchain. On `main` the
+WASM compile also runs automatically when a WASM build input changes —
+`config/version.env` (the pinned versions), `scripts/build-als-wasm.sh`, the
 cross-compile patch, or the workflow file itself — but not for documentation or
 the cheaper data/stdlib archive scripts, so unrelated commits do not trigger
 hour-long rebuilds.
@@ -108,15 +107,16 @@ another machine — the manifest records what *this* build produced.
 
 ## 7. Release
 
-Commit only the configuration and machinery (artifacts are gitignored):
+Commit the configuration change to `main` (artifacts are gitignored and never
+committed):
 
 ```sh
 git add config/version.env
 git commit -m "Add Agda <ver> configuration"
-git push origin agda-<ver>
+git push origin main
 ```
 
-Then tag to trigger a release (`v<agda>-als-<sha>`):
+Then tag `main` to trigger a release (`v<agda>-als-<sha>`):
 
 ```sh
 git tag v2.9.0-als-<short-sha>
@@ -131,8 +131,9 @@ then downloads that artifact, re-verifies it, and attaches the wasm, its gzip
 copy, both archives, the interface archive, and the manifest to the release. It
 never rebuilds, so the released files are exactly the ones that were verified.
 
-If no matching `build-wasm` artifact exists yet, start **Build WASM** by hand
-first so the tag does not pay for an hour-long recompile.
+Pushing `main` with a changed `config/version.env` already starts **Build WASM**,
+so the tag can usually reuse its artifact; if none matches yet, start **Build
+WASM** by hand first so the tag does not pay for an hour-long recompile.
 
 ## Interfaces
 
@@ -164,9 +165,8 @@ publishing it does not force every visitor to download the whole library. The
 script is restartable: it recompiles from scratch each run, and `JOBS` controls
 how many modules are checked in parallel.
 
-## Updating a branch in place
+## Updating the machinery
 
 For documentation, workflow, or tooling changes that are not version bumps,
-commit the change to `main`, then merge `main` into each `agda-*` branch. Do
-not recommit artifacts: since they are never committed, the next tagged build
-picks up the new machinery.
+commit the change to `main`. There are no `agda-*` branches to merge into, and
+artifacts are never committed: the next tagged build picks up the new machinery.

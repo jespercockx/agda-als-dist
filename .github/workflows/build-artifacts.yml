@@ -4,10 +4,10 @@ name: Build artifacts
 # one workflow artifact (`agda-<version>-artifacts`). Nothing is published here;
 # release.yml picks the artifact up and creates the release.
 #
-# The WASM compile is reused from the most recent `build-wasm` run on this
-# version branch whose wasm-info.json matches config/version.env. Rebuilding the
-# compiler is the fallback, not the default, so changes to the cheap scripts can
-# be iterated on without an hour-long recompile.
+# The WASM compile is reused from the most recent `build-wasm` run whose
+# wasm-info.json matches the tag's config/version.env. Rebuilding the compiler is
+# the fallback, not the default, so changes to the cheap scripts can be iterated
+# on without an hour-long recompile.
 
 on:
   push:
@@ -45,7 +45,6 @@ jobs:
             echo "ghc_wasm_meta_revision=${GHC_WASM_META_REVISION}"
             echo "ghc_wasm_meta_flavour=${GHC_WASM_META_FLAVOUR}"
             echo "entropy_version=${ENTROPY_VERSION}"
-            echo "branch=agda-${AGDA_VERSION}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Install host tools
@@ -63,7 +62,6 @@ jobs:
           GHC_WASM_META_REVISION: ${{ steps.version.outputs.ghc_wasm_meta_revision }}
           GHC_WASM_META_FLAVOUR: ${{ steps.version.outputs.ghc_wasm_meta_flavour }}
           ENTROPY_VERSION: ${{ steps.version.outputs.entropy_version }}
-          BRANCH: ${{ steps.version.outputs.branch }}
         run: |
           set -euo pipefail
           expected=$(jq -c -n \
@@ -90,7 +88,7 @@ jobs:
               fi
             fi
           done < <(gh run list --repo "$GITHUB_REPOSITORY" --workflow=build-wasm.yml \
-                     --branch "$BRANCH" --status=success --limit=20 \
+                     --status=success --limit=20 \
                      --json=databaseId --jq='.[].databaseId')
           echo "found=$found" >> "$GITHUB_OUTPUT"
 

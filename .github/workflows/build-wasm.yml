@@ -3,21 +3,21 @@ name: Build WASM
 # Rebuilds the Agda Language Server for WASI from the revisions pinned in
 # config/version.env and uploads it as the `als-wasm` workflow artifact, together
 # with a wasm-info.json recording the Agda version, the pins, and the wasm hash.
-# build-artifacts.yml later reuses this artifact when it matches the version
-# branch it is releasing, so cheap changes do not force an hour-long recompile.
+# build-artifacts.yml later reuses this artifact when it matches the
+# config/version.env being released, so cheap changes do not force an hour-long
+# recompile.
 #
-# This is the expensive workflow: it compiles Agda from source. On version
-# branches it therefore runs only when a *WASM* build input actually changes —
-# the pinned versions in config/version.env, the WASM build script, the
-# cross-compile patch, or this workflow. It can always be run by hand with
-# "Run workflow". Nothing is published here; releasing is build-artifacts.yml
-# followed by release.yml.
+# This is the expensive workflow: it compiles Agda from source. On `main` it
+# therefore runs only when a *WASM* build input actually changes — the pinned
+# versions in config/version.env, the WASM build script, the cross-compile patch,
+# or this workflow. It can always be run by hand with "Run workflow". Nothing is
+# published here; releasing is build-artifacts.yml followed by release.yml.
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - "agda-*"
+      - "main"
     paths:
       - "config/version.env"
       - "patches/**"

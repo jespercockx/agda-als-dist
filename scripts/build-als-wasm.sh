@@ -4,7 +4,7 @@
 #
 # This is a parameterized version of the build that used to live in
 # plfa-playground's compiler/ directory. Everything version-specific comes from
-# config/version.env so the same script works on every agda-<version> branch.
+# config/version.env so the same script works for every Agda version.
 #
 # Requirements (see README.md / UPDATING.md):
 #   - the pinned ghc-wasm-meta toolchain (wasm32-wasi-cabal, wasm32-wasi-ghc)

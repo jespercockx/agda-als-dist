@@ -4,8 +4,8 @@
 // the Agda version, the pinned upstream revisions, and the artifact hash.
 //
 // build-wasm.yml uploads this file next to the wasm so build-artifacts.yml can
-// tell whether an existing build matches the version branch it is releasing
-// before reusing it. It is a build-time hand-off file, not a release asset.
+// tell whether an existing build matches the version it is releasing before
+// reusing it. It is a build-time hand-off file, not a release asset.
 //
 // Usage: node scripts/wasm-info.mjs
 

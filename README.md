@@ -34,12 +34,12 @@ URLs), not from a branch checkout.
 | --- | --- | --- | --- |
 | `v2.8.0-als-e6541f8` | 2.8.0 | `als-2.8ext.wasm` | 2.3 |
 
-`main` carries only the shared build machinery and documentation. Each
-`agda-<version>` branch pins its upstream revisions in `config/version.env` and
-is what a release is built from; it does **not** commit artifacts. New Agda
-releases get a new `agda-<version>` branch and tag (see
-[`UPDATING.md`](UPDATING.md)); the machinery is version-parameterized, so older
-branches are unaffected.
+`main` carries the build machinery, the documentation, and the version pins in
+`config/version.env`. A release is built from the tagged commit on `main`; there
+is no per-version branch. To cut a release, set `config/version.env` on `main`
+and push a `v<agda>-als-<sha>` tag (see [`UPDATING.md`](UPDATING.md)). Existing
+releases stay pinned to their own tags, so the shared, version-parameterized
+machinery can move on without affecting them.
 
 Agda 2.8.0 and later are supported: earlier releases predate the `--setup`
 primitive installer that the WASM language server uses, and the
@@ -192,8 +192,8 @@ node scripts/verify-artifacts.mjs
 
 ## Building
 
-See [`UPDATING.md`](UPDATING.md) for the full runbook. In short, on an
-`agda-<version>` branch:
+See [`UPDATING.md`](UPDATING.md) for the full runbook. In short, from a checkout
+of `main`:
 
 ```sh
 # with the pinned ghc-wasm-meta toolchain on PATH
