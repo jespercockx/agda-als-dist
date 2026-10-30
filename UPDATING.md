@@ -62,12 +62,12 @@ modifications, which keeps the shipped compiler stock.
 ## 5. Build
 
 Either run the **Build WASM** and **Build artifacts** workflows from the Actions
-tab ("Run workflow"), or build locally with the pinned toolchain. On `main` the
-WASM compile also runs automatically when a WASM build input changes —
-`config/version.env` (the pinned versions), `scripts/build-als-wasm.sh`, the
-cross-compile patch, or the workflow file itself — but not for documentation or
-the cheaper data/stdlib archive scripts, so unrelated commits do not trigger
-hour-long rebuilds.
+tab ("Run workflow"; **Build artifacts** asks for a tag), or build locally with
+the pinned toolchain. On `main` the WASM compile also runs automatically when a
+WASM build input changes — `config/version.env` (the pinned versions),
+`scripts/build-als-wasm.sh`, the cross-compile patch, or the workflow file itself
+— but not for documentation or the cheaper data/stdlib archive scripts, so
+unrelated commits do not trigger hour-long rebuilds.
 
 To build locally with the pinned toolchain:
 
@@ -123,17 +123,18 @@ git tag v2.9.0-als-<short-sha>
 git push origin v2.9.0-als-<short-sha>
 ```
 
-The tag runs **Build artifacts**, which builds the data and interface archives,
-reuses the most recent `build-wasm` artifact whose `wasm-info.json` matches the
-tag's `config/version.env` (and otherwise compiles the wasm itself), verifies
-everything, and uploads one `agda-<version>-artifacts` artifact. **Release**
-then downloads that artifact, re-verifies it, and attaches the wasm, its gzip
-copy, both archives, the interface archive, and the manifest to the release. It
-never rebuilds, so the released files are exactly the ones that were verified.
+The tag runs **Build artifacts**, which restores the cached wasm for the pinned
+inputs (compiling it only if the cache is cold), builds the data and interface
+archives, verifies everything against `dist-manifest.json`, and publishes the
+release with the wasm, its gzip copy, both archives, the interface archive, and
+the manifest. There is no workflow-artifact hand-off: the released files are
+exactly the ones verified in the run.
 
-Pushing `main` with a changed `config/version.env` already starts **Build WASM**,
-so the tag can usually reuse its artifact; if none matches yet, start **Build
-WASM** by hand first so the tag does not pay for an hour-long recompile.
+Pushing `main` with a changed `config/version.env` starts **Build WASM**, which
+fills the cache under the new key; a tag cut afterwards restores it. The cache is
+scoped to the default branch so any tag can read it, but it expires if untouched
+for long enough — in that case the tag falls back to compiling the wasm itself
+(an hour-long job).
 
 ## Interfaces
 

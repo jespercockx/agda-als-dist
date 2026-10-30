@@ -167,13 +167,12 @@ built.
 
 ## Verification
 
-Two workflows check every artifact, byte length and SHA-256 against
-`dist-manifest.json`, plus that the gzip copy decompresses to exactly the wasm
-and that the interface archive holds the recorded number of `.agdai` files:
+Every artifact is checked against `dist-manifest.json` — byte length, SHA-256,
+that the gzip copy decompresses to exactly the wasm, and that the interface
+archive holds the recorded number of `.agdai` files:
 
-- `build-artifacts.yml` verifies what it just built, before uploading it.
-- `release.yml` re-verifies the uploaded artifact after downloading it, before
-  attaching it to the release.
+- `build-artifacts.yml` verifies the freshly built set just before it publishes
+  the release, so the released files are exactly the ones it verified.
 
 The build workflow additionally runs the produced wasm under `wasmtime` and
 asserts it reports its version:
@@ -205,15 +204,14 @@ node scripts/compute-manifest.mjs      # -> dist-manifest.json
 node scripts/verify-artifacts.mjs
 ```
 
-CI runs these steps split across two workflows. `build-wasm.yml` owns the
-expensive part (it compiles Agda) and runs only when a *WASM* input changes
-(`config/version.env`, `scripts/build-als-wasm.sh`, `patches/**`, or the
-workflow itself); it uploads the wasm as the `als-wasm` artifact.
-`build-artifacts.yml` builds the cheap artifacts from a version tag and reuses
-that wasm artifact when its `wasm-info.json` matches the tag's
-`config/version.env`, falling back to compiling it. `release.yml` then attaches
-the verified files to the release. The local path above exists so maintainers
-can reproduce and debug a build.
+CI splits the work across two workflows. `build-wasm.yml` owns the expensive
+part (it compiles Agda) and runs only when a *WASM* input changes
+(`config/version.env`, `scripts/build-als-wasm.sh`, `patches/**`, or the workflow
+itself); it stores the wasm in the Actions cache, keyed on those inputs.
+`build-artifacts.yml` runs on a version tag, restores that cache (falling back to
+compiling the wasm if it is cold), builds the cheap artifacts, verifies
+everything, and publishes the release. There is no workflow-artifact hand-off.
+The local path above exists so maintainers can reproduce and debug a build.
 
 `build-data-archive.sh` and `build-stdlib-interfaces.sh` need a native Agda of
 the exact version and download the official release binary automatically

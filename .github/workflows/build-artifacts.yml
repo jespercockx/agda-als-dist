@@ -1,23 +1,26 @@
 name: Build artifacts
 
-# Builds the full set of runtime artifacts for a version tag and uploads them as
-# one workflow artifact (`agda-<version>-artifacts`). Nothing is published here;
-# release.yml picks the artifact up and creates the release.
+# Builds the full set of runtime artifacts for a version tag, verifies them
+# against dist-manifest.json, and publishes them as a GitHub release in the same
+# run — nothing is handed off through a workflow artifact.
 #
-# The WASM compile is reused from the most recent `build-wasm` run whose
-# wasm-info.json matches the tag's config/version.env. Rebuilding the compiler is
-# the fallback, not the default, so changes to the cheap scripts can be iterated
-# on without an hour-long recompile.
+# The WASM compile is restored from the cache that build-wasm.yml fills, keyed on
+# the WASM build inputs. Rebuilding the compiler when the cache is cold is the
+# fallback, not the default, so changes to the cheap scripts can be iterated on
+# without an hour-long recompile.
 
 on:
   push:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and release, e.g. v2.8.0-als-e6541f8"
+        required: true
 
 permissions:
-  contents: read
-  actions: read
+  contents: write
 
 jobs:
   build:
@@ -25,6 +28,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -39,61 +44,29 @@ jobs:
           {
             echo "agda_version=${AGDA_VERSION}"
             echo "wasm_name=${ALS_WASM_NAME}"
-            echo "stdlib_version=${STDLIB_VERSION}"
-            echo "als_revision=${ALS_REVISION}"
-            echo "agda_revision=${AGDA_REVISION}"
             echo "ghc_wasm_meta_revision=${GHC_WASM_META_REVISION}"
             echo "ghc_wasm_meta_flavour=${GHC_WASM_META_FLAVOUR}"
-            echo "entropy_version=${ENTROPY_VERSION}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Install host tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl unzip zip jq xz-utils
+          sudo apt-get install -y curl unzip zip xz-utils
 
-      - name: Reuse a matching WASM build
+      # Same key as build-wasm.yml, so a tag restores what a `main` run saved. A
+      # `main` run's cache lives in the default-branch scope, which every ref can
+      # read; the tag itself never writes one.
+      - name: Restore the cached WASM
         id: wasm
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          AGDA_VERSION: ${{ steps.version.outputs.agda_version }}
-          ALS_REVISION: ${{ steps.version.outputs.als_revision }}
-          AGDA_REVISION: ${{ steps.version.outputs.agda_revision }}
-          GHC_WASM_META_REVISION: ${{ steps.version.outputs.ghc_wasm_meta_revision }}
-          GHC_WASM_META_FLAVOUR: ${{ steps.version.outputs.ghc_wasm_meta_flavour }}
-          ENTROPY_VERSION: ${{ steps.version.outputs.entropy_version }}
-        run: |
-          set -euo pipefail
-          expected=$(jq -c -n \
-            --arg agda "$AGDA_VERSION" \
-            --arg als "$ALS_REVISION" \
-            --arg agdaRevision "$AGDA_REVISION" \
-            --arg ghc "$GHC_WASM_META_REVISION" \
-            --arg flavour "$GHC_WASM_META_FLAVOUR" \
-            --arg entropy "$ENTROPY_VERSION" \
-            '{agdaVersion: $agda, pins: {als: $als, agda: $agdaRevision, ghcWasmMeta: $ghc, ghcWasmMetaFlavour: $flavour, entropy: $entropy}}')
-
-          found=false
-          while read -r run_id; do
-            [[ -n "$run_id" ]] || continue
-            rm -rf wasm-from-artifact
-            if gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
-                 --name als-wasm --dir wasm-from-artifact >/dev/null 2>&1; then
-              if [[ -f wasm-from-artifact/wasm-info.json ]] &&
-                [[ "$(jq -c '{agdaVersion, pins}' wasm-from-artifact/wasm-info.json)" == "$expected" ]]; then
-                cp wasm-from-artifact/*.wasm wasm-from-artifact/*.wasm.gz .
-                echo "Reusing the wasm from build-wasm run ${run_id}"
-                found=true
-                break
-              fi
-            fi
-          done < <(gh run list --repo "$GITHUB_REPOSITORY" --workflow=build-wasm.yml \
-                     --status=success --limit=20 \
-                     --json=databaseId --jq='.[].databaseId')
-          echo "found=$found" >> "$GITHUB_OUTPUT"
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ steps.version.outputs.wasm_name }}.wasm
+            ${{ steps.version.outputs.wasm_name }}.wasm.gz
+          key: als-wasm-${{ hashFiles('config/version.env', 'patches/**', 'scripts/build-als-wasm.sh') }}
 
       - name: Install pinned ghc-wasm-meta toolchain
-        if: steps.wasm.outputs.found != 'true'
+        if: steps.wasm.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           sudo apt-get install -y \
@@ -106,22 +79,19 @@ jobs:
           "$HOME/.ghc-wasm/add_to_github_path.sh"
 
       - name: Build ALS for WASI
-        if: steps.wasm.outputs.found != 'true'
+        if: steps.wasm.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           source "$HOME/.ghc-wasm/env"
           ./scripts/build-als-wasm.sh
 
       - name: Verify the built wasm reports its version
-        if: steps.wasm.outputs.found != 'true'
+        if: steps.wasm.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           source "$HOME/.ghc-wasm/env"
           wasmtime run -C cache=n -C compiler=cranelift -C parallel-compilation=n \
             -O opt-level=0 --env PATH= -- "${{ steps.version.outputs.wasm_name }}.wasm" --version
-
-      - name: Write wasm-info.json
-        run: node scripts/wasm-info.mjs
 
       - name: Fetch standard library archive
         run: ./scripts/fetch-stdlib-archive.sh
@@ -138,15 +108,27 @@ jobs:
       - name: Verify artifacts against the manifest
         run: node scripts/verify-artifacts.mjs
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: agda-${{ steps.version.outputs.agda_version }}-artifacts
-          path: |
-            ${{ steps.version.outputs.wasm_name }}.wasm
-            ${{ steps.version.outputs.wasm_name }}.wasm.gz
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+          AGDA_VERSION: ${{ steps.version.outputs.agda_version }}
+          WASM_NAME: ${{ steps.version.outputs.wasm_name }}
+        run: |
+          set -euo pipefail
+          assets=(
+            "${WASM_NAME}.wasm"
+            "${WASM_NAME}.wasm.gz"
             agda-data.zip
             agda-stdlib-*.zip
-            interfaces-${{ steps.version.outputs.agda_version }}.zip
+            "interfaces-${AGDA_VERSION}.zip"
             dist-manifest.json
-          if-no-files-found: error
+          )
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" "${assets[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Agda ${AGDA_VERSION} (${TAG})" \
+              --generate-notes
+          fi

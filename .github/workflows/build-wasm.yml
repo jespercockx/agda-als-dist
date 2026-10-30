@@ -1,17 +1,15 @@
 name: Build WASM
 
-# Rebuilds the Agda Language Server for WASI from the revisions pinned in
-# config/version.env and uploads it as the `als-wasm` workflow artifact, together
-# with a wasm-info.json recording the Agda version, the pins, and the wasm hash.
-# build-artifacts.yml later reuses this artifact when it matches the
-# config/version.env being released, so cheap changes do not force an hour-long
-# recompile.
+# Compiles the Agda Language Server for WASI from the revisions pinned in
+# config/version.env and stores the result in the Actions cache, keyed on the
+# WASM build inputs. build-artifacts.yml restores the same cache, so the
+# hour-long compile runs once per set of inputs instead of once per release.
 #
 # This is the expensive workflow: it compiles Agda from source. On `main` it
 # therefore runs only when a *WASM* build input actually changes — the pinned
 # versions in config/version.env, the WASM build script, the cross-compile patch,
 # or this workflow. It can always be run by hand with "Run workflow". Nothing is
-# published here; releasing is build-artifacts.yml followed by release.yml.
+# published here; releasing is build-artifacts.yml.
 
 on:
   workflow_dispatch:
@@ -22,7 +20,6 @@ on:
       - "config/version.env"
       - "patches/**"
       - "scripts/build-als-wasm.sh"
-      - "scripts/wasm-info.mjs"
       - ".github/workflows/build-wasm.yml"
 
 permissions:
@@ -47,7 +44,19 @@ jobs:
             echo "als_wasm_name=${ALS_WASM_NAME}"
           } >> "$GITHUB_OUTPUT"
 
+      # The key must stay identical to build-artifacts.yml's so a release run can
+      # restore what this run saved.
+      - name: Restore the cached WASM
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ steps.version.outputs.als_wasm_name }}.wasm
+            ${{ steps.version.outputs.als_wasm_name }}.wasm.gz
+          key: als-wasm-${{ hashFiles('config/version.env', 'patches/**', 'scripts/build-als-wasm.sh') }}
+
       - name: Install host build tools
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -55,6 +64,7 @@ jobs:
             autoconf automake libtool alex happy
 
       - name: Install pinned ghc-wasm-meta toolchain
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           git clone --filter=blob:none https://gitlab.haskell.org/ghc/ghc-wasm-meta.git "$RUNNER_TEMP/ghc-wasm-meta"
@@ -65,27 +75,25 @@ jobs:
           "$HOME/.ghc-wasm/add_to_github_path.sh"
 
       - name: Build ALS for WASI
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           source "$HOME/.ghc-wasm/env"
           ./scripts/build-als-wasm.sh
 
-      - name: Write wasm-info.json
-        run: node scripts/wasm-info.mjs
-
       - name: Verify the built wasm reports its version
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           source "$HOME/.ghc-wasm/env"
           wasmtime run -C cache=n -C compiler=cranelift -C parallel-compilation=n \
             -O opt-level=0 --env PATH= -- "${{ steps.version.outputs.als_wasm_name }}.wasm" --version
 
-      - name: Upload the WASM artifact
-        uses: actions/upload-artifact@v4
+      - name: Cache the built WASM
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
         with:
-          name: als-wasm
           path: |
             ${{ steps.version.outputs.als_wasm_name }}.wasm
             ${{ steps.version.outputs.als_wasm_name }}.wasm.gz
-            wasm-info.json
-          if-no-files-found: error
+          key: als-wasm-${{ hashFiles('config/version.env', 'patches/**', 'scripts/build-als-wasm.sh') }}
