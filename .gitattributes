@@ -1,9 +1,3 @@
-# Artifacts are binary; never apply text conversion or EOL normalisation.
-*.wasm binary
-*.wasm.gz binary
-*.zip binary
-*.agdai binary
-
-# Keep the manifest diffable as text.
-dist-manifest.json text eol=lf
+# Keep the version pins diffable as text with LF endings. Artifacts are never
+# committed, so no binary attributes are needed.
 config/version.env text eol=lf
