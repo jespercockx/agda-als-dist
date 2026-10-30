@@ -32,7 +32,7 @@ URLs), not from a branch checkout.
 
 | Release | Agda | ALS file | stdlib |
 | --- | --- | --- | --- |
-| `v2.8.0-als-e6541f8` | 2.8.0 | `als-2.8ext.wasm` | 2.3 |
+| [`v2.8.0-als-e6541f8`](https://github.com/jespercockx/agda-als-dist/releases/tag/v2.8.0-als-e6541f8) | 2.8.0 | `als-2.8ext.wasm` | 2.3 |
 
 `main` carries the build machinery, the documentation, and the version pins in
 `config/version.env`. A release is built from the tagged commit on `main`; there
