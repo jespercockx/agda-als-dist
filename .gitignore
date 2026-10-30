@@ -4,3 +4,15 @@
 
 # Transient files from the archive scripts.
 *.zip.next
+
+# Build outputs. These are published as release assets and never committed; the
+# build-artifacts and release workflows assemble them, and a local
+# `node scripts/compute-manifest.mjs` picks up whatever is present.
+/als-*.wasm
+/als-*.wasm.gz
+/agda-data.zip
+/agda-stdlib-*.zip
+/interfaces/
+/interfaces-*.zip
+/dist-manifest.json
+/wasm-info.json

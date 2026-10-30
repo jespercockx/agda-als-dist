@@ -1,19 +1,17 @@
-name: Build ALS WASM
+name: Build WASM
 
 # Rebuilds the Agda Language Server for WASI from the revisions pinned in
-# config/version.env, assembles the distribution artifacts (wasm, gzip
-# transport copy, primitive data archive, stdlib archive) and regenerates
-# dist-manifest.json.
+# config/version.env and uploads it as the `als-wasm` workflow artifact, together
+# with a wasm-info.json recording the Agda version, the pins, and the wasm hash.
+# build-artifacts.yml later reuses this artifact when it matches the version
+# branch it is releasing, so cheap changes do not force an hour-long recompile.
 #
 # This is the expensive workflow: it compiles Agda from source. On version
 # branches it therefore runs only when a *WASM* build input actually changes —
 # the pinned versions in config/version.env, the WASM build script, the
 # cross-compile patch, or this workflow. It can always be run by hand with
-# "Run workflow". The data/stdlib archive scripts are cheap to regenerate
-# locally and do not trigger a rebuild.
-#
-# Releasing the *committed* (manifest-verified) artifacts is a separate, fast,
-# tag-triggered workflow: release.yml.
+# "Run workflow". Nothing is published here; releasing is build-artifacts.yml
+# followed by release.yml.
 
 on:
   workflow_dispatch:
@@ -24,7 +22,8 @@ on:
       - "config/version.env"
       - "patches/**"
       - "scripts/build-als-wasm.sh"
-      - ".github/workflows/build-als-wasm.yml"
+      - "scripts/wasm-info.mjs"
+      - ".github/workflows/build-wasm.yml"
 
 permissions:
   contents: read
@@ -71,17 +70,8 @@ jobs:
           source "$HOME/.ghc-wasm/env"
           ./scripts/build-als-wasm.sh
 
-      - name: Fetch standard library archive
-        run: ./scripts/fetch-stdlib-archive.sh
-
-      - name: Build primitive data archive
-        run: |
-          set -euo pipefail
-          source "$HOME/.ghc-wasm/env"
-          ./scripts/build-data-archive.sh
-
-      - name: Regenerate dist-manifest.json
-        run: node scripts/compute-manifest.mjs
+      - name: Write wasm-info.json
+        run: node scripts/wasm-info.mjs
 
       - name: Verify the built wasm reports its version
         run: |
@@ -90,17 +80,12 @@ jobs:
           wasmtime run -C cache=n -C compiler=cranelift -C parallel-compilation=n \
             -O opt-level=0 --env PATH= -- "${{ steps.version.outputs.als_wasm_name }}.wasm" --version
 
-      - name: Verify artifacts against the manifest
-        run: node scripts/verify-artifacts.mjs
-
-      - name: Upload artifacts
+      - name: Upload the WASM artifact
         uses: actions/upload-artifact@v4
         with:
-          name: agda-als-${{ steps.version.outputs.agda_version }}
+          name: als-wasm
           path: |
             ${{ steps.version.outputs.als_wasm_name }}.wasm
             ${{ steps.version.outputs.als_wasm_name }}.wasm.gz
-            agda-data.zip
-            agda-stdlib-*.zip
-            dist-manifest.json
-
+            wasm-info.json
+          if-no-files-found: error

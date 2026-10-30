@@ -1,12 +1,18 @@
 #!/usr/bin/env node
 //
-// Verify the committed artifacts on this branch against dist-manifest.json.
+// Verify a set of runtime artifacts against dist-manifest.json.
 //
 // Checks, for every artifact: presence, byte length, and SHA-256. Additionally
-// re-checks that the gzip transport copy decompresses to the exact wasm that is
-// committed, so a stale or mismatched `.gz` cannot slip through.
+// re-checks that the gzip transport copy decompresses to the exact wasm, and
+// that the standard-library interface archive (when the manifest lists one)
+// still holds the recorded number of `.agdai` files.
 //
 // Usage: node scripts/verify-artifacts.mjs
+//
+// The artifacts and manifest are expected in the repository root (or wherever
+// this is run from): the build-artifacts workflow produces them there, and the
+// release workflow downloads the built artifact into the root before running
+// this, so the same check guards both hand-offs.
 
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -14,14 +20,15 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 
+import { countZipEntries } from "./lib/zip.mjs";
+
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const manifestPath = join(repoRoot, "dist-manifest.json");
 
-// Artifacts live on the per-version branches (agda-<version>). The shared
-// `main` branch and pull requests targeting it carry no manifest, so there is
-// nothing to verify there.
+// The manifest is produced by the build, not committed, so a checkout without
+// one has nothing to verify.
 if (!existsSync(manifestPath)) {
-  console.log("No dist-manifest.json on this branch; nothing to verify.");
+  console.log("No dist-manifest.json here; nothing to verify.");
   process.exit(0);
 }
 
@@ -64,16 +71,29 @@ check(
 check("data", manifest.data.path, manifest.data.byteLength, manifest.data.sha256);
 check("stdlib", manifest.stdlib.path, manifest.stdlib.byteLength, manifest.stdlib.sha256);
 
+if (manifest.interfaces) {
+  const { asset, count, byteLength, sha256: expected } = manifest.interfaces;
+  const buffer = check("interfaces", asset, byteLength, expected);
+  if (buffer) {
+    const actualCount = countZipEntries(buffer, ".agdai");
+    if (actualCount !== count) {
+      failures.push(`interfaces: ${asset} holds ${actualCount} .agdai files, manifest says ${count}`);
+    } else {
+      console.log(`ok  interfaces (${actualCount} .agdai files)`);
+    }
+  }
+}
+
 if (wasmBuffer) {
   const compressed = readFileSync(join(repoRoot, manifest.wasm.compressedPath));
   const inflated = gunzipSync(compressed);
   const sha = sha256(inflated);
   if (sha !== manifest.wasm.sha256) {
     failures.push(
-      `wasm.gz: decompresses to sha256 ${sha}, expected the committed wasm ${manifest.wasm.sha256}`,
+      `wasm.gz: decompresses to sha256 ${sha}, expected the shipped wasm ${manifest.wasm.sha256}`,
     );
   } else {
-    console.log("ok  wasm.gz decompresses to the committed wasm");
+    console.log("ok  wasm.gz decompresses to the shipped wasm");
   }
 }
 

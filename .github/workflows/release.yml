@@ -1,48 +1,50 @@
 name: Release
 
-# Publishes a GitHub release for a version tag, attaching the *committed*
-# artifacts. It does not rebuild anything: the artifacts on a version branch
-# are the authoritative, manifest-verified ones, and this workflow re-checks
-# them before publishing. Tag names follow `v<agda>-als-<sha>`, e.g.
-# `v2.8.0-als-e6541f8`.
+# Publishes a GitHub release for a version tag, attaching the artifact produced
+# by build-artifacts.yml. It never builds anything: it downloads the built
+# artifact, re-verifies it against dist-manifest.json, and attaches exactly those
+# files. `workflow_run` guarantees the release cannot start before its build
+# finished. Tag names follow `v<agda>-als-<sha>`, e.g. `v2.8.0-als-e6541f8`.
 #
-# Keep this fast; building lives in build-als-wasm.yml.
+# Keep this fast; building lives in build-wasm.yml (the compiler) and
+# build-artifacts.yml (everything else).
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_run:
+    workflows: ["Build artifacts"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       tag:
         description: "Tag to publish, e.g. v2.8.0-als-e6541f8"
         required: true
+      run-id:
+        description: "Build artifacts run id (optional; resolved from the tag when empty)"
+        required: false
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   release:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # On workflow_run, use the commit the build validated; a manual run
+          # uses the ref it was dispatched with.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
-
-      - name: Ensure this is a version branch with artifacts
-        run: |
-          set -euo pipefail
-          if [[ ! -f dist-manifest.json ]]; then
-            echo "No dist-manifest.json here. Releases must be tagged on an agda-<version> branch." >&2
-            exit 1
-          fi
-
-      - name: Verify committed artifacts against dist-manifest.json
-        run: node scripts/verify-artifacts.mjs
 
       - name: Read version configuration
         id: version
@@ -54,12 +56,58 @@ jobs:
             echo "wasm_name=${ALS_WASM_NAME}"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Resolve the tag and the build run
+        id: run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_RUN_ID: ${{ inputs.run-id }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            tag="$INPUT_TAG"
+            run_id="$INPUT_RUN_ID"
+            if [[ -z "$run_id" ]]; then
+              run_id=$(gh run list --repo "$GITHUB_REPOSITORY" \
+                --workflow=build-artifacts.yml --limit=50 \
+                --json=databaseId,headBranch \
+                --jq ".[] | select(.headBranch == \"$tag\") | .databaseId" | head -n1)
+            fi
+          else
+            tag="${{ github.event.workflow_run.head_branch }}"
+            run_id="${{ github.event.workflow_run.id }}"
+          fi
+          if [[ -z "$tag" || -z "$run_id" ]]; then
+            echo "Could not determine a tag and build-artifacts run to release." >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download the built artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          rm -rf release-assets
+          mkdir release-assets
+          gh run download "${{ steps.run.outputs.run_id }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "agda-${{ steps.version.outputs.agda_version }}-artifacts" \
+            --dir release-assets
+          # verify-artifacts.mjs reads the artifacts relative to the repo root.
+          cp release-assets/* .
+          ls -l release-assets
+
+      - name: Re-verify the downloaded artifacts
+        run: node scripts/verify-artifacts.mjs
+
       - name: Publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.run.outputs.tag }}
           AGDA_VERSION: ${{ steps.version.outputs.agda_version }}
           WASM_NAME: ${{ steps.version.outputs.wasm_name }}
-          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
           assets=(
@@ -67,12 +115,14 @@ jobs:
             "${WASM_NAME}.wasm.gz"
             agda-data.zip
             agda-stdlib-*.zip
+            "interfaces-${AGDA_VERSION}.zip"
             dist-manifest.json
           )
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "${assets[@]}" --clobber
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
           else
             gh release create "$TAG" "${assets[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
               --title "Agda ${AGDA_VERSION} (${TAG})" \
               --generate-notes
           fi

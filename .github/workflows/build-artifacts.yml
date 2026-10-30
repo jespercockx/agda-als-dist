@@ -1,0 +1,154 @@
+name: Build artifacts
+
+# Builds the full set of runtime artifacts for a version tag and uploads them as
+# one workflow artifact (`agda-<version>-artifacts`). Nothing is published here;
+# release.yml picks the artifact up and creates the release.
+#
+# The WASM compile is reused from the most recent `build-wasm` run on this
+# version branch whose wasm-info.json matches config/version.env. Rebuilding the
+# compiler is the fallback, not the default, so changes to the cheap scripts can
+# be iterated on without an hour-long recompile.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Read version configuration
+        id: version
+        run: |
+          set -euo pipefail
+          source config/version.env
+          {
+            echo "agda_version=${AGDA_VERSION}"
+            echo "wasm_name=${ALS_WASM_NAME}"
+            echo "stdlib_version=${STDLIB_VERSION}"
+            echo "als_revision=${ALS_REVISION}"
+            echo "agda_revision=${AGDA_REVISION}"
+            echo "ghc_wasm_meta_revision=${GHC_WASM_META_REVISION}"
+            echo "ghc_wasm_meta_flavour=${GHC_WASM_META_FLAVOUR}"
+            echo "entropy_version=${ENTROPY_VERSION}"
+            echo "branch=agda-${AGDA_VERSION}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install host tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl unzip zip jq xz-utils
+
+      - name: Reuse a matching WASM build
+        id: wasm
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AGDA_VERSION: ${{ steps.version.outputs.agda_version }}
+          ALS_REVISION: ${{ steps.version.outputs.als_revision }}
+          AGDA_REVISION: ${{ steps.version.outputs.agda_revision }}
+          GHC_WASM_META_REVISION: ${{ steps.version.outputs.ghc_wasm_meta_revision }}
+          GHC_WASM_META_FLAVOUR: ${{ steps.version.outputs.ghc_wasm_meta_flavour }}
+          ENTROPY_VERSION: ${{ steps.version.outputs.entropy_version }}
+          BRANCH: ${{ steps.version.outputs.branch }}
+        run: |
+          set -euo pipefail
+          expected=$(jq -c -n \
+            --arg agda "$AGDA_VERSION" \
+            --arg als "$ALS_REVISION" \
+            --arg agdaRevision "$AGDA_REVISION" \
+            --arg ghc "$GHC_WASM_META_REVISION" \
+            --arg flavour "$GHC_WASM_META_FLAVOUR" \
+            --arg entropy "$ENTROPY_VERSION" \
+            '{agdaVersion: $agda, pins: {als: $als, agda: $agdaRevision, ghcWasmMeta: $ghc, ghcWasmMetaFlavour: $flavour, entropy: $entropy}}')
+
+          found=false
+          while read -r run_id; do
+            [[ -n "$run_id" ]] || continue
+            rm -rf wasm-from-artifact
+            if gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
+                 --name als-wasm --dir wasm-from-artifact >/dev/null 2>&1; then
+              if [[ -f wasm-from-artifact/wasm-info.json ]] &&
+                [[ "$(jq -c '{agdaVersion, pins}' wasm-from-artifact/wasm-info.json)" == "$expected" ]]; then
+                cp wasm-from-artifact/*.wasm wasm-from-artifact/*.wasm.gz .
+                echo "Reusing the wasm from build-wasm run ${run_id}"
+                found=true
+                break
+              fi
+            fi
+          done < <(gh run list --repo "$GITHUB_REPOSITORY" --workflow=build-wasm.yml \
+                     --branch "$BRANCH" --status=success --limit=20 \
+                     --json=databaseId --jq='.[].databaseId')
+          echo "found=$found" >> "$GITHUB_OUTPUT"
+
+      - name: Install pinned ghc-wasm-meta toolchain
+        if: steps.wasm.outputs.found != 'true'
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y \
+            build-essential git zstd autoconf automake libtool alex happy
+          git clone --filter=blob:none https://gitlab.haskell.org/ghc/ghc-wasm-meta.git "$RUNNER_TEMP/ghc-wasm-meta"
+          git -C "$RUNNER_TEMP/ghc-wasm-meta" fetch --depth=1 origin "${{ steps.version.outputs.ghc_wasm_meta_revision }}"
+          git -C "$RUNNER_TEMP/ghc-wasm-meta" checkout --detach FETCH_HEAD
+          FLAVOUR="${{ steps.version.outputs.ghc_wasm_meta_flavour }}" PREFIX="$HOME/.ghc-wasm" \
+            "$RUNNER_TEMP/ghc-wasm-meta/setup.sh"
+          "$HOME/.ghc-wasm/add_to_github_path.sh"
+
+      - name: Build ALS for WASI
+        if: steps.wasm.outputs.found != 'true'
+        run: |
+          set -euo pipefail
+          source "$HOME/.ghc-wasm/env"
+          ./scripts/build-als-wasm.sh
+
+      - name: Verify the built wasm reports its version
+        if: steps.wasm.outputs.found != 'true'
+        run: |
+          set -euo pipefail
+          source "$HOME/.ghc-wasm/env"
+          wasmtime run -C cache=n -C compiler=cranelift -C parallel-compilation=n \
+            -O opt-level=0 --env PATH= -- "${{ steps.version.outputs.wasm_name }}.wasm" --version
+
+      - name: Write wasm-info.json
+        run: node scripts/wasm-info.mjs
+
+      - name: Fetch standard library archive
+        run: ./scripts/fetch-stdlib-archive.sh
+
+      - name: Build primitive data archive
+        run: ./scripts/build-data-archive.sh
+
+      - name: Build standard-library interfaces
+        run: ./scripts/build-stdlib-interfaces.sh
+
+      - name: Regenerate dist-manifest.json
+        run: node scripts/compute-manifest.mjs
+
+      - name: Verify artifacts against the manifest
+        run: node scripts/verify-artifacts.mjs
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: agda-${{ steps.version.outputs.agda_version }}-artifacts
+          path: |
+            ${{ steps.version.outputs.wasm_name }}.wasm
+            ${{ steps.version.outputs.wasm_name }}.wasm.gz
+            agda-data.zip
+            agda-stdlib-*.zip
+            interfaces-${{ steps.version.outputs.agda_version }}.zip
+            dist-manifest.json
+          if-no-files-found: error

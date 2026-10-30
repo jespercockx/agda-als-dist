@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 //
-// Compute dist-manifest.json for this branch from config/version.env and the
-// artifact files sitting next to it.
+// Compute dist-manifest.json from config/version.env and the artifact files
+// sitting next to it.
 //
 // The manifest is the machine-readable contract consumed by downstream apps
-// (see plfa-playground's scripts/sync-runtime.mjs): package versions, pinned
-// upstream commits, byte lengths, and SHA-256 hashes of every artifact.
+// (see the template's scripts/sync-runtime.mjs): package versions, pinned
+// upstream commits, byte lengths, and SHA-256 hashes of every artifact. It is
+// produced by the build-artifacts workflow and attached to the GitHub release
+// for a version tag; it is never committed.
 //
 // Usage: node scripts/compute-manifest.mjs
 
@@ -13,6 +15,8 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { countZipEntries } from "./lib/zip.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -41,10 +45,33 @@ function describe(relativePath) {
   return { path: relativePath, byteLength: bytes, sha256 };
 }
 
+/**
+ * Describe the standard-library interface archive, which consumers download
+ * once at build time and then serve same-origin, so a check fetches only the
+ * interfaces it needs. Returns null when the archive has not been built yet;
+ * consumers treat a missing entry as "no precompiled interfaces".
+ */
+function describeInterfaces(relativePath, root) {
+  const absolute = join(repoRoot, relativePath);
+  if (!existsSync(absolute)) return null;
+  const buffer = readFileSync(absolute);
+  const zip = describe(relativePath);
+  return {
+    asset: zip.path,
+    byteLength: zip.byteLength,
+    sha256: zip.sha256,
+    count: countZipEntries(buffer, ".agdai"),
+    // Where the tree starts inside the archive; mirrors the layout Agda writes
+    // under _build/<agdaVersion>/agda/src/ (see build-stdlib-interfaces.sh).
+    root,
+  };
+}
+
 const wasmPath = `${version.ALS_WASM_NAME}.wasm`;
 const compressedPath = `${wasmPath}.gz`;
 const dataPath = "agda-data.zip";
 const stdlibPath = `agda-stdlib-${version.STDLIB_VERSION}.zip`;
+const interfacesPath = `interfaces-${version.AGDA_VERSION}.zip`;
 
 const wasm = describe(wasmPath);
 const compressed = describe(compressedPath);
@@ -87,6 +114,9 @@ const manifest = {
     sha256: stdlib.sha256,
   },
 };
+
+const interfaces = describeInterfaces(interfacesPath, "src");
+if (interfaces) manifest.interfaces = interfaces;
 
 const manifestPath = join(repoRoot, "dist-manifest.json");
 writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
