@@ -1,51 +1,46 @@
 # agda-als-dist
 
-WebAssembly distributions of the **Agda Language Server** (ALS) together with
-the runtime data a browser-based Agda client needs: Agda's primitive library,
-a matching standard-library bundle, precompiled standard-library interfaces, and
-gzip transport copies. Everything is built from unmodified upstream sources, and
-every artifact is pinned and checksummed.
+WebAssembly distributions of the Agda Language Server (ALS) together with the
+runtime data a browser-based Agda client needs: Agda's primitive library, a
+matching standard-library bundle, precompiled standard-library interfaces, and
+gzip transport copies.
 
-It is designed for any browser or WASI project that wants to run Agda without a
-server — playgrounds, notebooks, editor integrations, teaching tools.
+It is aimed at browser and WASI projects that want to run Agda without a
+server: playgrounds, notebooks, editor integrations, teaching tools.
 
 ## Why this exists
 
-Agda's would-be WebAssembly home, [`agda-web/agda-wasm-dist`](https://github.com/agda-web/agda-wasm-dist),
-distributes only the **plain `agda` executable**. It does not ship the language
-server, the gzip transport copies, the primitive data archive, the standard
-library bundle, or a machine-readable manifest. Editors and LSP clients want
-the language server, and shipping those extra pieces is what makes a
-"first visit, start typing" experience possible.
+Agda's WebAssembly distribution,
+[`agda-web/agda-wasm-dist`](https://github.com/agda-web/agda-wasm-dist),
+distributes only a plain `agda` executable. Editors and LSP clients also want
+the language server, the gzip transport copy, the primitive data archive, the
+standard-library bundle, and a machine-readable manifest; shipping those extra
+pieces is what makes a first-visit, start-typing experience possible. This
+repository distributes that full set, complementing `agda-wasm-dist`. See
+[`NOTICE.md`](NOTICE.md) for provenance.
 
-This repository fills that gap. It does **not** replace `agda-wasm-dist`; the
-two are complementary. See [`NOTICE.md`](NOTICE.md) for provenance.
+## Releases
 
-## Releases: one per Agda version
-
-Each supported Agda release gets one GitHub **Release**, tagged
-`v<agda>-als-<sha>` (for example `v2.8.0-als-e6541f8`). The release attaches the
-built artifacts described below as **release assets**. That is where they live:
-none of them are committed to a branch, so download them from the release page
-(or its `https://github.com/jespercockx/agda-als-dist/releases/download/<tag>/<asset>`
-URLs), not from a branch checkout.
+Each supported Agda release gets one GitHub Release, tagged
+`v<agda>-als-<sha>` (for example `v2.8.0-als-e6541f8`). The built artifacts
+described below are attached to the release as release assets. Download them
+from the release page or its
+`https://github.com/jespercockx/agda-als-dist/releases/download/<tag>/<asset>`
+URLs; they are attached to the release only, so a branch checkout contains
+just the build machinery.
 
 | Release | Agda | ALS file | stdlib |
 | --- | --- | --- | --- |
 | [`v2.8.0-als-e6541f8`](https://github.com/jespercockx/agda-als-dist/releases/tag/v2.8.0-als-e6541f8) | 2.8.0 | `als-2.8ext.wasm` | 2.3 |
 
-`main` carries the build machinery, the documentation, and the version pins in
-`config/version.env`. A release is built from the tagged commit on `main`; there
-is no per-version branch. To cut a release, set `config/version.env` on `main`
-and push a `v<agda>-als-<sha>` tag (see [`UPDATING.md`](UPDATING.md)). Existing
-releases stay pinned to their own tags, so the shared, version-parameterized
-machinery can move on without affecting them.
+This repository carries the build machinery, the documentation, and the version
+pins in `config/version.env`. Each releases is built from a tagged commit on
+`main`. [`UPDATING.md`](UPDATING.md) contains instructions for adding a new
+release.
 
-Agda 2.8.0 and later are supported: earlier releases predate the `--setup`
-primitive installer that the WASM language server uses, and the
-`_build/<version>/agda/` interface layout relied on below.
-
-Consumers that build against several Agda versions pin one release per version.
+Releases cover Agda 2.8.0 and later. Earlier Agda releases predate the
+`--setup` primitive installer that the WASM language server uses, and the
+`_build/<version>/agda/` interface layout described below.
 
 ## What a release contains
 
@@ -58,19 +53,11 @@ Consumers that build against several Agda versions pin one release per version.
 | `interfaces-<agdaVersion>.zip` | Precompiled standard-library interfaces, `src/**/*.agdai`, one file per module |
 | `dist-manifest.json` | Versions, pinned commits, byte lengths, SHA-256 hashes |
 
-The standard-library *source* archive is small so that clients which never
-import the library do not pay for it. The primitive archive, by contrast, ships
-precomputed `.agdai` interfaces so no client ever recompiles the primitive
-library.
+The `agda-data.zip` archive contains both sources and precompiled interface
+files for Agda's minimal built-in library files.
 
-The standard-library interface archive is the standard-library equivalent,
-split into one file per module so a client can fetch exactly the interfaces a
-check asks for instead of the whole library (see the template's `interfaces`
-setting). Its root is `src/`, mirroring the layout Agda writes under
-`_build/<agdaVersion>/agda/src/`, so a consumer maps a module the drive asks for
-to `<baseUrl>/src/<Module>.agdai`. It is downloaded once at build time and
-served same-origin; see the note on CORS below.
-
+The standard-library archive is split into a small source archive and a separate
+archive with precomputed `.agdai` files for clients that wish to include them.
 Agda 2.8 and later look for interfaces only under `_build/<agdaVersion>/agda/`
 (local interfaces beside sources were removed), so the primitive archive puts
 them exactly where Agda will look:
@@ -79,9 +66,7 @@ them exactly where Agda will look:
 lib/prim/_build/2.8.0/agda/Agda/Builtin/Nat.agdai
 ```
 
-A consumer extracts the archive into its Agda data directory as-is; there is no
-relocation step. `dist-manifest.json` also records this location as
-`data.interfaceDir`.
+`dist-manifest.json` also records this location as `data.interfaceDir`.
 
 ## Consuming the artifacts
 
@@ -100,26 +85,20 @@ curl -fLO "$base/agda-stdlib-2.3.zip"
 curl -fLO "$base/interfaces-2.8.0.zip"
 ```
 
-The template's `scripts/sync-runtime.mjs` does exactly this, checking every
-file against `dist-manifest.json` and caching the downloads so a warm checkout
-needs no network. Pin the release tag (and, if you want the tag itself
-authenticated, the manifest's SHA-256) in committed projects.
-
-### Release assets are not CORS-readable
+Extract the archives into your site's static files, and serve it same-origin.
 
 GitHub redirects release downloads to `release-assets.githubusercontent.com`,
-whose responses carry no `access-control-allow-origin`. A page that is
-cross-origin isolated with COOP/COEP therefore **cannot** fetch an individual
-release asset from the browser. Release assets are a build-time and human
-channel only: download the interface archive while building the site, extract it
-into the site's static files, and serve it same-origin. A runtime
-per-file fetch has to target a CORS host (GitHub Pages, `raw.githubusercontent.com`,
-jsDelivr), never a release asset.
+whose responses carry no `access-control-allow-origin`, so a page that is
+cross-origin isolated with COOP/COEP cannot fetch an individual release asset
+from the browser. For runtime per-file fetches, use a CORS host instead (GitHub
+Pages, `raw.githubusercontent.com`, jsDelivr).
 
-## `dist-manifest.json`
+## Verification
 
-The manifest is the contract for consumers. It replaces the byte lengths and
-cache-bust strings that clients used to hardcode:
+Every artifact is recorded in `dist-manifest.json` with its byte length and
+SHA-256; the manifest is also what confirms that the gzip copy decompresses to
+exactly the wasm and that the interface archive holds the recorded number of
+`.agdai` files.
 
 ```json
 {
@@ -159,75 +138,29 @@ cache-bust strings that clients used to hardcode:
 }
 ```
 
-`wasm.byteLength` is the uncompressed length, used to set `Content-Length` when
-a client inflates the gzip copy itself. `wasm.cacheBust` is derived from the
-artifact hash, so it changes whenever the binary does. `interfaces` describes
-the standard-library interface archive and is absent when the archive was not
-built.
+`wasm.byteLength` is the uncompressed length, used to set `Content-Length`
+when a client inflates the gzip copy itself. `wasm.cacheBust` is derived from
+the artifact hash, so it changes whenever the binary does. `interfaces`
+describes the standard-library interface archive and is absent when the
+archive was not built.
 
-## Verification
-
-Every artifact is checked against `dist-manifest.json` — byte length, SHA-256,
-that the gzip copy decompresses to exactly the wasm, and that the interface
-archive holds the recorded number of `.agdai` files:
-
-- `build-artifacts.yml` verifies the freshly built set just before it publishes
-  the release, so the released files are exactly the ones it verified.
-
-The build workflow additionally runs the produced wasm under `wasmtime` and
-asserts it reports its version:
+CI runs the same verification on the freshly built set right before
+publishing a release, so the released files are exactly the ones it verified,
+and additionally runs the produced wasm under `wasmtime`, asserting that it
+reports its version:
 
 ```
 $ wasmtime run als-2.8ext.wasm --version
 Agda v2.8.0 Language Server v6 (WebAssembly build RAW)
 ```
 
-`verify-artifacts.mjs` expects the artifacts and manifest in the repository
-root; run it locally after a local build with:
-
-```sh
-node scripts/verify-artifacts.mjs
-```
-
 ## Building
 
-See [`UPDATING.md`](UPDATING.md) for the full runbook. In short, from a checkout
-of `main`:
-
-```sh
-# with the pinned ghc-wasm-meta toolchain on PATH
-./scripts/build-als-wasm.sh            # -> als-<ver>.wasm (+ .gz)
-./scripts/fetch-stdlib-archive.sh      # -> agda-stdlib-<ver>.zip
-./scripts/build-data-archive.sh        # -> agda-data.zip
-./scripts/build-stdlib-interfaces.sh   # -> interfaces/<agdaVersion>/ + interfaces-<agdaVersion>.zip
-node scripts/compute-manifest.mjs      # -> dist-manifest.json
-node scripts/verify-artifacts.mjs
-```
-
-CI splits the work across two workflows. `build-wasm.yml` owns the expensive
-part (it compiles Agda) and runs only when a *WASM* input changes
-(`config/version.env`, `scripts/build-als-wasm.sh`, `patches/**`, or the workflow
-itself); it stores the wasm in the Actions cache, keyed on those inputs.
-`build-artifacts.yml` runs on a version tag, restores that cache (falling back to
-compiling the wasm if it is cold), builds the cheap artifacts, verifies
-everything, and publishes the release. There is no workflow-artifact hand-off.
-The local path above exists so maintainers can reproduce and debug a build.
-
-`build-data-archive.sh` and `build-stdlib-interfaces.sh` need a native Agda of
-the exact version and download the official release binary automatically
-(`AGDA_BINARY` overrides this, e.g. for a locally built build of the pinned
-revision, or on platforms without an official binary).
-
-Why not let the WASM build generate its own interfaces? The ALS is a language
-server, not a command-line type checker: producing interfaces from it means
-driving the LSP protocol, and it additionally requires a WASI host that can
-switch stdin to nonblocking and provide the in-memory drive layer the browser
-uses. Stock `wasmtime` and `wasmer` reject the nonblocking-stdin call and stall
-during document open, so interface generation is done with the native binary
-instead. Because the official Agda 2.8.0 release and the pinned `agda-web/agda`
-revision are byte-identical, this produces interfaces the WASM build accepts;
-when the pinned `agda-web/agda` checkout is present, `build-data-archive.sh`
-diffs the two source trees and aborts if they ever diverge.
+Instructions for building the artifacts from source and cutting a new release
+live in [`UPDATING.md`](UPDATING.md). In outline: the versions and pinned
+revisions are set in `config/version.env`, the scripts in `scripts/` build
+each artifact, and pushing a `v<agda>-als-<sha>` tag makes CI verify the set
+and publish the release.
 
 ## License
 
